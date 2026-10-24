@@ -137,8 +137,8 @@ const PREFERRED_FALLBACK: &[&str] = &[
     "segoeui",
     "arial",
 ];
-/// Fonts known to cover a right-to-left script, tried before the general search for its
-/// characters (the general search loads a bounded number of files, and wide-coverage CJK fonts
+/// Fonts known to cover a script the wide-coverage fonts often lack (Arabic, Hebrew, Thai),
+/// tried before the general search for its characters (the general search loads a bounded number of files, and wide-coverage CJK fonts
 /// come first in it). Matched as substrings of the normalised file stem.
 const ARABIC_FALLBACK: &[&str] = &[
     "vazirmatn",
@@ -156,6 +156,22 @@ const ARABIC_FALLBACK: &[&str] = &[
     "dejavusans",
 ];
 const HEBREW_FALLBACK: &[&str] = &["notosanshebrew", "notoserifhebrew", "arial", "tahoma", "segoeui", "dejavusans"];
+/// ภาษาไทย: Windows (Leelawadee UI `LeelawUI.ttf`, Leelawadee, Tahoma, Cordia/Angsana), macOS
+/// (Thonburi), Noto and the Thai government fonts (TH Sarabun New and others), TLWG on Linux.
+const THAI_FALLBACK: &[&str] = &[
+    "leelawui",
+    "leelawad",
+    "notosansthai",
+    "notosansthailooped",
+    "sarabun",
+    "tahoma",
+    "thonburi",
+    "garuda",
+    "loma",
+    "notoserifthai",
+    "cordia",
+    "angsa",
+];
 /// Script-specific fallback files loaded per character, at most.
 const MAX_SCRIPT_FILES: usize = 4;
 
@@ -164,6 +180,7 @@ fn script_fallback(c: char) -> &'static [&'static str] {
     match c {
         '\u{0600}'..='\u{08FF}' | '\u{FB50}'..='\u{FDFF}' | '\u{FE70}'..='\u{FEFF}' => ARABIC_FALLBACK,
         '\u{0590}'..='\u{05FF}' | '\u{FB1D}'..='\u{FB4F}' => HEBREW_FALLBACK,
+        '\u{0E00}'..='\u{0E7F}' => THAI_FALLBACK,
         _ => &[],
     }
 }
@@ -854,7 +871,7 @@ pub(crate) fn place_glyph_at(g: &GlyphOutline, origin: Vec2, scale: f64, wf: f64
 /// Characters the face lacks come from a fallback font, scaled to its own cap height.
 pub fn shape(face: &Face, s: &str, height: f64, width_factor: f64, oblique: f64) -> Option<Shaped> {
     face.font()?;
-    if crate::bidi::has_rtl(s)
+    if crate::bidi::needs_shaping(s)
         && let Some(sh) = crate::complex::shape(Some(face), s, height, width_factor, oblique)
     {
         return Some(sh);
@@ -892,7 +909,7 @@ pub fn shape(face: &Face, s: &str, height: f64, width_factor: f64, oblique: f64)
 /// Width of one line set in a TrueType face.
 pub fn width(face: &Face, s: &str, height: f64, width_factor: f64) -> Option<f64> {
     face.font()?;
-    if crate::bidi::has_rtl(s)
+    if crate::bidi::needs_shaping(s)
         && let Some(sh) = crate::complex::shape(Some(face), s, height, width_factor, 0.0)
     {
         return Some(sh.width);

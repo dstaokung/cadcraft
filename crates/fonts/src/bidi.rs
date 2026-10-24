@@ -21,6 +21,14 @@ pub fn has_rtl(s: &str) -> bool {
     s.chars().any(is_rtl)
 }
 
+/// Whether a line must be shaped (OpenType GSUB/GPOS) rather than set one glyph per
+/// character: right-to-left text, and Thai and Lao, whose vowel signs and tone marks stack
+/// above and below the consonant and only sit right when the font's mark positioning applies
+/// (otherwise a tone mark over an upper vowel, as in ชั้น or พื้น, overlaps it).
+pub fn needs_shaping(s: &str) -> bool {
+    s.chars().any(|c| is_rtl(c) || matches!(c, '\u{0E00}'..='\u{0EFF}'))
+}
+
 /// Invisible formatting characters: joiners, directional marks, embeddings and isolates. They
 /// take no space and draw nothing (a shaper still sees the joiners).
 pub(crate) fn is_format_control(c: char) -> bool {
@@ -433,6 +441,7 @@ mod tests {
     #[test]
     fn levels_and_reorder() {
         assert!(has_rtl("abc سلام") && !has_rtl("abc 123"));
+        assert!(needs_shaping("ชั้น") && needs_shaping("سلام") && !needs_shaping("abc 123") && !has_rtl("ชั้น"));
         assert_eq!(base_rtl("  123 سلام abc"), Some(true));
         assert_eq!(base_rtl("123"), None);
         let lv = char_levels("ab سل", None);
