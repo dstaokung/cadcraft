@@ -10,6 +10,15 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR"
 
+# plan/ is gitignored and local-only. When the session also has the private
+# cadcraft-plan repository checked out next to this one, link it in as plan/.
+PLAN_REPO="$(dirname "$CLAUDE_PROJECT_DIR")/cadcraft-plan"
+if [ -d "$PLAN_REPO" ] && [ ! -e plan ]; then
+  ln -s "$PLAN_REPO" plan
+  # .gitignore's /plan/ matches only directories, so hide the symlink too.
+  grep -qxF '/plan' .git/info/exclude 2>/dev/null || echo '/plan' >> .git/info/exclude
+fi
+
 rustup component add rustfmt clippy
 rustup target add wasm32-unknown-unknown
 
