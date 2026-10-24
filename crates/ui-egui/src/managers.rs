@@ -949,21 +949,20 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
     layouts.sort_by_key(|l| l.0);
     targets.extend(layouts.into_iter().map(|l| l.1));
     let generation = PLOT_GEN.load(Ordering::Relaxed);
-    let mut st = temp::<PlotState>(ctx, "plot_state").filter(|s| s.generation == generation && targets.contains(&s.target)).unwrap_or_else(|| {
-        let target = app.session.layout_space().tab_name().to_string();
-        let mut ext = d.extents(&cadcraft_doc::Space::Model);
-        if ext.is_empty() {
-            ext = cadcraft_geom::Bounds2::new(cadcraft_geom::Vec2::ZERO, cadcraft_geom::Vec2::new(12.0, 9.0));
-        }
-        PlotState {
-            generation,
-            page: plot_page(d, &target),
-            target,
-            window: [ext.min.x, ext.min.y, ext.max.x, ext.max.y],
-            center: true,
-            offset_mm: [0.0, 0.0],
-        }
-    });
+    // TK: the settings applied or plotted with last time come back (`plot_memory`).
+    let drawing = app.session.state().map(|s| s.path.clone().unwrap_or_else(|| s.title.clone())).unwrap_or_default();
+    let mut ext = d.extents(&cadcraft_doc::Space::Model);
+    if ext.is_empty() {
+        ext = cadcraft_geom::Bounds2::new(cadcraft_geom::Vec2::ZERO, cadcraft_geom::Vec2::new(12.0, 9.0));
+    }
+    let ext = [ext.min.x, ext.min.y, ext.max.x, ext.max.y];
+    let start = |target: String| match crate::plot_memory::recall(&drawing, &target, ext) {
+        Some(sv) => PlotState { generation, page: sv.page, target, window: sv.window, center: sv.center, offset_mm: sv.offset_mm },
+        None => PlotState { generation, page: plot_page(d, &target), target, window: ext, center: true, offset_mm: [0.0, 0.0] },
+    };
+    let mut st = temp::<PlotState>(ctx, "plot_state")
+        .filter(|s| s.generation == generation && targets.contains(&s.target))
+        .unwrap_or_else(|| start(app.session.layout_space().tab_name().to_string()));
     let model = st.target == "Model";
     let choices = PageChoices::new(ctx, d);
     let offset_supported =
@@ -972,6 +971,7 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
     let mut ok = temp::<bool>(ctx, PLOT_NOW) == Some(true);
     set_temp(ctx, PLOT_NOW, false);
     let (mut cancel, mut action, mut pick, mut preview) = (false, None, false, false);
+    let mut applied = false;
     let center = ctx.content_rect().center();
     egui::Window::new("Plot").open(open).collapsible(false).resizable(false).pivot(egui::Align2::CENTER_CENTER).default_pos(center).show(ctx, |ui| {
         egui::Grid::new("plot_target").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
@@ -979,8 +979,7 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
             egui::ComboBox::from_id_salt("plot_layout").selected_text(st.target.as_str()).width(190.0).show_ui(ui, |ui| {
                 for n in &targets {
                     if ui.selectable_label(*n == st.target, n).clicked() && *n != st.target {
-                        st.page = plot_page(d, n);
-                        st.target = n.clone();
+                        st = start(n.clone());
                     }
                 }
             });
@@ -1023,7 +1022,12 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
         });
         ui.separator();
         ui.horizontal(|ui| {
+            if model && ui.button("Apply").on_hover_text("Use these settings the next time you plot model space").clicked() {
+                crate::plot_memory::remember(&drawing, &st.target, saved(&st));
+                applied = true;
+            }
             if !model && ui.button("Apply to Layout").on_hover_text("Save these settings in the layout's page setup").clicked() {
+                crate::plot_memory::remember(&drawing, &st.target, saved(&st));
                 let page = &st.page;
                 action = Some((
                     "pagesetup",
@@ -1047,6 +1051,9 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
     // The output file type follows the device.
     let ext = choices.devices.iter().find(|dv| dv.name.eq_ignore_ascii_case(&st.page.device)).map_or("pdf", |dv| dv.output.as_str());
     set_temp(ctx, "plot_state", st.clone());
+    if applied {
+        app.session.echo("Plot settings applied to Model: the next plot starts from them.");
+    }
     if cancel {
         *open = false;
     }
@@ -1082,6 +1089,7 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
         *open = false;
         match app.run("plot", params) {
             Ok(r) => {
+                crate::plot_memory::remember(&drawing, &st.target, saved(&st));
                 let msg = match r.get("path").and_then(Value::as_str) {
                     Some(path) => format!("Plotted {} to {path}", st.target),
                     None => format!("Plotted {} ({} bytes of PDF; there is no file dialog here)", st.target, r["bytes"]),
@@ -1093,6 +1101,11 @@ fn plot(app: &mut CadApp, ctx: &egui::Context, open: &mut bool) -> Action {
         }
     }
     action
+}
+
+/// What [`crate::plot_memory`] keeps of the dialog's settings.
+fn saved(st: &PlotState) -> crate::plot_memory::Saved {
+    crate::plot_memory::Saved { page: st.page.clone(), window: st.window, center: st.center, offset_mm: st.offset_mm }
 }
 
 /// The sheet in the chosen orientation with its printable area, and its size.

@@ -24,6 +24,8 @@ pub mod dialogs;
 pub mod docking;
 pub mod hatchdlg;
 mod mtext_editor;
+/// TK fork: plot settings remembered between plots.
+pub mod plot_memory;
 pub mod spacemouse;
 // The External References palette.
 pub mod xrefs;

@@ -103,6 +103,7 @@ impl eframe::App for App {
         storage.set_string(cadcraft_ui_egui::options::PROFILE_KEY, self.cad.profile_json());
         storage.set_string(cadcraft_ui_egui::PREFS_KEY, self.cad.prefs_json());
         storage.set_string(cadcraft_ui_egui::autosave::PREFS_KEY, cadcraft_ui_egui::autosave::prefs_json());
+        storage.set_string(cadcraft_ui_egui::plot_memory::PREFS_KEY, cadcraft_ui_egui::plot_memory::prefs_json());
     }
     fn persist_egui_memory(&self) -> bool {
         false
@@ -334,6 +335,9 @@ fn main() -> eframe::Result {
             }
             if let Some(prefs) = cc.storage.and_then(|s| s.get_string(cadcraft_ui_egui::autosave::PREFS_KEY)) {
                 cadcraft_ui_egui::autosave::load_prefs(&prefs);
+            }
+            if let Some(prefs) = cc.storage.and_then(|s| s.get_string(cadcraft_ui_egui::plot_memory::PREFS_KEY)) {
+                cadcraft_ui_egui::plot_memory::load_prefs(&prefs);
             }
             // Autosave files (SAVEFILEPATH) default to `<settings dir>/autosave`.
             if let Some(dir) = config_dir() {
