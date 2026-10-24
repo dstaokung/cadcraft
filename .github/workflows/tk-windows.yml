@@ -1,15 +1,19 @@
 name: TK build (Windows)
 
-# Builds this fork's CADCraft for Windows x64 and publishes it as a GitHub Release:
-#   - a push to `main`          -> a release "tk-<n>" (the version to use)
-#   - a push to any other branch -> a pre-release "tk-<n>-<branch>" (to try a change first)
-#   - Actions > TK build (Windows) > Run workflow: the same, for the chosen branch
-# Download: Releases > newest > cadcraft-tk-windows-x64.zip, unzip, run cadcraft.exe.
+# This fork keeps `main` identical to storytold/cadcraft (so "Sync fork" never conflicts) and
+# keeps TK's changes on the `tk` branch. This workflow lives on `tk` and the branches made
+# from it:
+#   - push to `tk`           -> release "tk-<n>", and the fixed "latest" release is replaced
+#                               with it; only the 5 newest tk-<n> are kept; all pre-releases
+#                               are removed (their work is now in tk)
+#   - push to another branch -> pre-release "tk-<n>-<branch>" to try a change first (only the
+#                               newest one per branch is kept)
+# Download: Releases > latest > cadcraft-tk-windows-x64.zip, unzip, run cadcraft.exe.
 # Unsigned: on first launch Windows may warn ("More info" > "Run anyway").
 
 on:
   push:
-    branches: ["**"]
+    branches-ignore: [main]
     paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
 
@@ -22,8 +26,12 @@ concurrency:
 
 jobs:
   windows:
+    if: github.ref_name != 'main'
     runs-on: windows-latest
     timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
 
@@ -41,33 +49,38 @@ jobs:
           New-Item -ItemType Directory -Force $dir | Out-Null
           Copy-Item target/release/cadcraft.exe, target/release/cadcraft-cli.exe $dir
           Copy-Item LICENSE-MIT, LICENSE-APACHE, NOTICE $dir
-          "Built from ${{ github.ref_name }} @ ${{ github.sha }}" | Out-File "$dir/BUILD.txt"
+          "Built from ${{ github.ref_name }} @ ${{ github.sha }} (run ${{ github.run_number }})" | Out-File "$dir/BUILD.txt"
           Compress-Archive -Path "$dir/*" -DestinationPath cadcraft-tk-windows-x64.zip
 
-      - name: Release name
-        id: tag
+      - name: Publish and tidy releases
         shell: bash
         run: |
-          if [ "${GITHUB_REF_NAME}" = "main" ]; then
-            echo "tag=tk-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
-            echo "pre=false" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          n="${GITHUB_RUN_NUMBER}"
+          zip="cadcraft-tk-windows-x64.zip"
+          notes="CADCraft (fork ของ TK) สำหรับ Windows 64 บิต — branch ${GITHUB_REF_NAME}, build ${n}
+
+          วิธีใช้: ดาวน์โหลด ${zip} แตกไฟล์ไว้ในโฟลเดอร์ เช่น C:\\CADCraft-TK\\ (แตกทับของเดิมได้) แล้วเปิด cadcraft.exe
+          ครั้งแรก Windows อาจเตือน: กด More info แล้วกด Run anyway"
+
+          if [ "${GITHUB_REF_NAME}" = "tk" ]; then
+            gh release create "tk-${n}" "$zip" --target "$GITHUB_SHA" --title "CADCraft TK build ${n}" --notes "$notes"
+            # The fixed "latest" link: replaced by this build.
+            gh release delete latest --cleanup-tag --yes 2>/dev/null || true
+            gh release create latest "$zip" --target "$GITHUB_SHA" --title "CADCraft TK — ล่าสุด (build ${n})" --notes "$notes" --latest
+            # Keep the 5 newest tk-<n> builds.
+            gh release list --limit 200 --json tagName --jq '.[].tagName' \
+              | { grep -E '^tk-[0-9]+$' || true; } | sort -t- -k2 -n -r | tail -n +6 \
+              | while read -r t; do gh release delete "$t" --cleanup-tag --yes; done
+            # Pre-releases of branches merged into tk are no longer needed.
+            gh release list --limit 200 --json tagName,isPrerelease --jq '.[] | select(.isPrerelease) | .tagName' \
+              | while read -r t; do gh release delete "$t" --cleanup-tag --yes; done
           else
-            safe=$(echo "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9._-' '-')
-            echo "tag=tk-${GITHUB_RUN_NUMBER}-${safe}" >> "$GITHUB_OUTPUT"
-            echo "pre=true" >> "$GITHUB_OUTPUT"
+            safe=$(printf '%s' "${GITHUB_REF_NAME}" | tr -c 'A-Za-z0-9._-' '-')
+            # Only the newest pre-release per branch.
+            gh release list --limit 200 --json tagName --jq '.[].tagName' \
+              | { grep -E "^tk-[0-9]+-${safe}\$" || true; } \
+              | while read -r t; do gh release delete "$t" --cleanup-tag --yes; done
+            gh release create "tk-${n}-${safe}" "$zip" --target "$GITHUB_SHA" --prerelease \
+              --title "ทดลอง: ${GITHUB_REF_NAME} (build ${n})" --notes "$notes"
           fi
-
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: CADCraft TK ${{ steps.tag.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          prerelease: ${{ steps.tag.outputs.pre == 'true' }}
-          body: |
-            CADCraft (fork ของ TK) สำหรับ Windows 64 บิต
-            branch: ${{ github.ref_name }}
-
-            วิธีใช้: ดาวน์โหลด cadcraft-tk-windows-x64.zip แตกไฟล์ไว้ในโฟลเดอร์ เช่น C:\CADCraft-TK\ แล้วเปิด cadcraft.exe
-            ครั้งแรก Windows อาจเตือน: กด More info แล้วกด Run anyway
-          files: cadcraft-tk-windows-x64.zip
